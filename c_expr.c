@@ -2,18 +2,26 @@ extern int printf(const char* c, ...);
 extern unsigned long long strlen(const char* s);
 extern int isdigit(int);
 extern int isspace(int);
+extern int isalpha(int);
+extern int isalnum(int);
 extern void* memset( void*, int , unsigned long long );
 
 #include <assert.h>
 
 /*
    accepts string of the grammar
+
       digit  -> 0123456789
+
       digits -> digit+
-      term   -> digits
+
+      term   -> digits 
+             |  ( expr )
+
       factor -> term
              |  factor * term
              |  factor / term
+
       expr   -> factor
              |  expr   + factor
              |  expr   - factor
@@ -55,12 +63,16 @@ typedef enum TokenizerState{
 typedef enum TokenType{
         TokenType_invalid = 0, // so memset gives an invalid token
         TokenType_Literal,
-        TokenType_Operator
+        TokenType_Word,
+        TokenType_Operator,
+        TokenType_LParam,
+        TokenType_RParam
 }TokenType;
 
 typedef struct Token{
         TokenType type;
         int value;
+        char word[128];
         char op;
 }Token;
 
@@ -127,21 +139,41 @@ int Tokenizer_Next(TokenizerContext* ctx){
                         ctx->peak.op   = *ctx->iter;
                         ++ctx->iter;
                         break;
+                case '(':
+                        ctx->peak.type = TokenType_LParam;
+                        ++ctx->iter;
+                        break;
+                case ')':
+                        ctx->peak.type = TokenType_RParam;
+                        ++ctx->iter;
+                        break;
                 default:{
-                        // try to get value, otherwise fail the whole stream
-                        // because the peak is invalid
-                        const char* end = ctx->iter;
-                        int value = 0;
-                        for(; end != ctx->end; ++end){
-                                if( ! isdigit(*end) )
-                                        break;
-                                value *= 10;
-                                value += *end - '0';
-                        }
-                        if( end != ctx->iter ){
+                        if( isdigit(*ctx->iter)){
+                                // try to get value, otherwise fail the whole stream
+                                // because the peak is invalid
+                                const char* end = ctx->iter;
+                                ctx->peak.value = 0;
+                                for(; end != ctx->end; ++end){
+                                        if( ! isdigit(*end) )
+                                                break;
+                                        ctx->peak.value *= 10;
+                                        ctx->peak.value += *end - '0';
+                                }
                                 ctx->peak.type  = TokenType_Literal;
-                                ctx->peak.value = value;
                                 ctx->iter = end;
+                                return 1;
+                        } else if( isalpha(*ctx->iter)){
+                                const char* end = ctx->iter;
+                                char* word_ptr = ctx->peak.word;
+                                for(; end != ctx->end; ++end){
+                                        if( ! ( isalnum(*end) || *end == '_' ) )
+                                                break;
+                                        *word_ptr = *end;
+                                        ++word_ptr;
+                                }
+                                ctx->peak.type  = TokenType_Word;
+                                ctx->iter = end;
+                                return 1;
                         } else{
                                 // fail here
                                 ctx->state = TokenizerState_Error;
@@ -382,7 +414,7 @@ void Node_InitOperator(Node* ptr, Operator op, Node* left, Node* right){
         ptr->kind   = ExprKind_BinaryOperator;
         ptr->op     = op;
         ptr->arg0   = left;
-        ptr->arg1  = right;
+        ptr->arg1   = right;
 }
 
 typedef struct ParserContext{
@@ -402,21 +434,34 @@ int ParserContext_Eval(ParserContext* ctx, Node* node){
         return result;
 }
 
+int parse_expr(ParserContext* ctx);
+
 int parse_term(ParserContext* ctx){
         switch(ctx->tokenizer.tok.type){
-        case TokenType_Literal: 
-                break;
+        case TokenType_Literal: {
+                // we got a literal
+                Node* ptr = MemoryPool_Alloc(&ctx->pool, sizeof(Node));
+                Node_InitValue(ptr, ctx->tokenizer.tok.value);
+                *ctx->stack_ptr = ptr;
+                ++ctx->stack_ptr;
+                // eat it
+                Tokenizer_Next(&ctx->tokenizer);
+                return 1;
+        }
+        case TokenType_LParam:
+                // eat it
+                Tokenizer_Next(&ctx->tokenizer);
+                parse_expr(ctx);
+                if(ctx->tokenizer.tok.type != TokenType_RParam){
+                        ctx->fail = 1;
+                        return 0;
+                }
+                // eat it
+                Tokenizer_Next(&ctx->tokenizer);
+                return 1;
         default:
                 return 0;
         }
-        // we got a literal
-        Node* ptr = MemoryPool_Alloc(&ctx->pool, sizeof(Node));
-        Node_InitValue(ptr, ctx->tokenizer.tok.value);
-        *ctx->stack_ptr = ptr;
-        ++ctx->stack_ptr;
-        // eat it
-        Tokenizer_Next(&ctx->tokenizer);
-        return 1;
 }
 
 int parse_factor(ParserContext* ctx){
@@ -524,6 +569,7 @@ int eval(const char* str){
 int main(){
         #define EVAL_TEST( EXPR ) do{\
                 int result = eval(#EXPR);\
+                printf(#EXPR " = %d\n", result); \
                 if( result != (EXPR) ){\
                         printf("eval failed on "#EXPR"\n");\
                 }\
@@ -539,6 +585,9 @@ int main(){
         EVAL_TEST(1+2+3*4+5);
         EVAL_TEST(1+2*3+4+5);
         EVAL_TEST(1*2+3+4+5);
+        
+        EVAL_TEST(1+2*(3+4)+5);
+        EVAL_TEST(1*(2+3)+4+5);
 
         EVAL_TEST( 234 + 8788 / 2334); 
         EVAL_TEST( 234 * 8788 / 2334); 
