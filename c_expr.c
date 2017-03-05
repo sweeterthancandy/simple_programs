@@ -6,6 +6,7 @@ extern int isalpha(int);
 extern int isalnum(int);
 extern void* memset( void*, int , unsigned long long );
 extern char* strcpy( char*, const char*);
+extern int strcmp(const char*, const char*);
 
 #include <assert.h>
 
@@ -297,58 +298,29 @@ typedef enum Operator{
         
 typedef struct Node{
         int kind;
-        int value;
+        double value;
         char name[128];
         Operator op;
-        struct Node* arg0;
-        struct Node* arg1;
         struct Node* args[32];
+        int arity;
 }Node;
 
-#if 0
-typedef void(*NodeVisitorFunction)(struct NodeVisitor*, Node*);
+typedef struct InternalFunctionMapping{
+        const char* name;
+        double(*fun)();
+}InternalFunctionMapping;
 
-typedef struct NodeVisitor{
-        // meta
-        NodeVisitorFunction onBegin;
-        NodeVisitorFunction onEnd;
-        
-        // for terminals
-        NodeVisitorFunction onValue;
+extern double cos(double);
+extern double sin(double);
+static InternalFunctionMapping internalFunctions[] = {
+        {"cos", &cos},
+        {"sin", &sin},
+        {0,0}
+};
 
-        // for those with childen
-        NodeVisitorFunction onBeginBinaryOperator;
-        NodeVisitorFunction onEndBinaryOperator;
-}NodeVisitor;
+double Node_Eval(Node* node){
 
-void Node_Apply(NodeVisitor* v, Node* node){
-        if( node == 0 ){
-                // this is bad, don't know what to do
-                return;
-        }
-        switch(node->kind){
-        case ExprKind_Value:
-                if( v->onValue )
-                        v->onValue( v, node);
-                break;
-        case ExprKind_BinaryOperator:
-                if( v->onBeginBinaryOperator )
-                        v->onBeginBinaryOperator( v, node);
 
-                Node_Apply(v, node->arg0);
-                Node_Apply(v, node->arg1);
-                
-                if( v->onEndBinaryOperator )
-                        v->onEndBinaryOperator( v, node);
-                break;
-        defualt:
-                printf("<invalid>");
-                break;
-        }
-}
-#endif
-
-int Node_Eval(Node* node){
         if( node == 0 ){
                 return -1;
         }
@@ -359,12 +331,35 @@ int Node_Eval(Node* node){
                         // TODO
                         return 1;
                 case ExprKind_Call:
+                        for(InternalFunctionMapping* iter = internalFunctions; iter->name != 0;++iter){
+                                if( strcmp( iter->name, node->name ) == 0 ){
+                                        double evalArgs[32] = {0};
+                                        double* evalPtr = evalArgs;
+                                        double ret;
+
+                                        for(Node** iter = node->args; *iter != 0; ++iter){
+                                                *evalPtr = Node_Eval( *iter);
+                                                printf("%f, ", *evalPtr);
+                                                ++evalPtr;
+                                        }
+                                        printf("\narity = %d\n", node->arity);
+                                        switch(node->arity){
+                                        case 2: ret = iter->fun(evalArgs[0], evalArgs[1]); break;
+                                        case 1: ret = iter->fun(evalArgs[0]);              break;
+                                        case 0: ret = iter->fun();                         break;
+                                        default:
+                                                // TODO not implemented
+                                                return 0;
+                                        }
+                                        return ret;
+                                }
+                        }
                         // TODO
                         return 1;
                 case ExprKind_BinaryOperator: {
-                        int lp = Node_Eval(node->arg0);
-                        int rp = Node_Eval(node->arg1);
-                        int ret = -1;
+                        double lp = Node_Eval(node->args[0]);
+                        double rp = Node_Eval(node->args[1]);
+                        double ret = -1;
                         switch(node->op){
                         case Operator_Add: ret = lp + rp; break;
                         case Operator_Sub: ret = lp - rp; break;
@@ -385,7 +380,7 @@ void Node_Dump(Node* node){
         }
         switch(node->kind){
         case ExprKind_Value:
-                printf("value(%d)", node->value);
+                printf("value(%f)", node->value);
                 break;
         case ExprKind_Indentifier:
                 printf("identifier(%s)", (const char*)node->name);
@@ -406,9 +401,9 @@ void Node_Dump(Node* node){
                 case Operator_Mul: printf("*"); break;
                 }
                 printf(" ,");
-                Node_Dump(node->arg0);
+                Node_Dump(node->args[0]);
                 printf(" ,");
-                Node_Dump(node->arg1);
+                Node_Dump(node->args[1]);
                 printf(")");
                 break;
         defualt:
@@ -424,7 +419,7 @@ void Node_DumpPretty(Node* node){
         }
         switch(node->kind){
         case ExprKind_Value:
-                printf("%d", node->value);
+                printf("%f", node->value);
                 break;
         case ExprKind_Indentifier:
                 printf("%s", node->name );
@@ -438,14 +433,14 @@ void Node_DumpPretty(Node* node){
                 break;
         case ExprKind_BinaryOperator:
                 printf("(");
-                Node_DumpPretty(node->arg0);
+                Node_DumpPretty(node->args[0]);
                 switch(node->op){
                 case Operator_Add: printf("+"); break;
                 case Operator_Sub: printf("-"); break;
                 case Operator_Div: printf("/"); break;
                 case Operator_Mul: printf("*"); break;
                 }
-                Node_DumpPretty(node->arg1);
+                Node_DumpPretty(node->args[1]);
                 printf(")");
                 break;
         defualt:
@@ -454,7 +449,7 @@ void Node_DumpPretty(Node* node){
         }
 }
 
-void Node_InitValue(Node* ptr, int value){
+void Node_InitValue(Node* ptr, double value){
         memset(ptr, 0, sizeof(*ptr));
         ptr->kind  = ExprKind_Value;
         ptr->value = value;
@@ -471,14 +466,16 @@ void Node_InitCall(Node* ptr, const char* name, Node** args){
         strcpy(ptr->name, name);
         for(Node** iter = args, **dest = ptr->args; *iter != 0; ++iter){
                 *dest = *iter;
+                ++ptr->arity;
         }
 }
 void Node_InitOperator(Node* ptr, Operator op, Node* left, Node* right){
         memset(ptr, 0, sizeof(*ptr));
         ptr->kind   = ExprKind_BinaryOperator;
         ptr->op     = op;
-        ptr->arg0   = left;
-        ptr->arg1   = right;
+        ptr->args[0]= left;
+        ptr->args[1]= right;
+        ptr->arity = 2;
 }
 
 typedef struct ParserContext{
@@ -489,12 +486,12 @@ typedef struct ParserContext{
         int              fail; // fail flag
 }ParserContext;
 
-int ParserContext_Eval(ParserContext* ctx, Node* node){
+double ParserContext_Eval(ParserContext* ctx, Node* node){
         if( ctx->fail ||
             ctx->stack_ptr - ctx->stack_mem != 1 )
                 return 0;
 
-        int result = Node_Eval( ctx->stack_mem[0] );
+        double result = Node_Eval( ctx->stack_mem[0] );
         return result;
 }
 
@@ -693,14 +690,14 @@ int eval(const char* str){
                 return -1;
         }
 
-        int result = Node_Eval( ctx.stack_mem[0] );
+        double result = Node_Eval( ctx.stack_mem[0] );
         
         #if 1
         Node_Dump( ctx.stack_mem[0] );
         printf("\n");
         Node_DumpPretty( ctx.stack_mem[0] );
         printf("\n");
-        printf("eval -> %d\n", result  );
+        printf("eval -> %f\n", result  );
         printf("\n");
         #endif
         return result;
@@ -745,12 +742,15 @@ int main(){
         #endif
         
         
+        #if 0
         eval("f(1)");
         eval("f(1+2)");
         eval("f(1,2)");
         eval("f()");
+        #endif
         
-        eval(" 23 * f(1,2 / 5) - 3");
+        eval("cos(2)");
+        eval("2*sin(23)");
         
         #if 0
         eval("");
