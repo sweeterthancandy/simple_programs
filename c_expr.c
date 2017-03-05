@@ -750,6 +750,8 @@ int main(){
         eval("f(1,2)");
         eval("f()");
         
+        eval(" 23 * f(1,2 / 5) - 3");
+        
         #if 0
         eval("");
         eval("1");
