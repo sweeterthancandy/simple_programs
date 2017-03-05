@@ -251,6 +251,98 @@ typedef struct Node{
         struct Node* arg1;
 }Node;
 
+#if 0
+typedef void(*NodeVisitorFunction)(struct NodeVisitor*, Node*);
+
+typedef struct NodeVisitor{
+        // meta
+        NodeVisitorFunction onBegin;
+        NodeVisitorFunction onEnd;
+        
+        // for terminals
+        NodeVisitorFunction onValue;
+
+        // for those with childen
+        NodeVisitorFunction onBeginBinaryOperator;
+        NodeVisitorFunction onEndBinaryOperator;
+}NodeVisitor;
+
+void Node_Apply(NodeVisitor* v, Node* node){
+        if( node == 0 ){
+                // this is bad, don't know what to do
+                return;
+        }
+        switch(node->kind){
+        case ExprKind_Value:
+                if( v->onValue )
+                        v->onValue( v, node);
+                break;
+        case ExprKind_BinaryOperator:
+                if( v->onBeginBinaryOperator )
+                        v->onBeginBinaryOperator( v, node);
+
+                Node_Apply(v, node->arg0);
+                Node_Apply(v, node->arg1);
+                
+                if( v->onEndBinaryOperator )
+                        v->onEndBinaryOperator( v, node);
+                break;
+        defualt:
+                printf("<invalid>");
+                break;
+        }
+}
+#endif
+
+void Node_DumpPretty(Node* node){
+        if( node == 0 ){
+                printf("<null>");
+                return;
+        }
+        switch(node->kind){
+        case ExprKind_Value:
+                printf("%d", node->value);
+                break;
+        case ExprKind_BinaryOperator:
+                printf("(");
+                Node_DumpPretty(node->arg0);
+                switch(node->op){
+                case Operator_Add: printf("+"); break;
+                case Operator_Sub: printf("-"); break;
+                case Operator_Div: printf("/"); break;
+                case Operator_Mul: printf("*"); break;
+                }
+                Node_DumpPretty(node->arg1);
+                printf(")");
+                break;
+        defualt:
+                printf("<invalid>");
+                break;
+        }
+}
+int Node_Eval(Node* node){
+        if( node == 0 ){
+                return -1;
+        }
+        switch(node->kind){
+                case ExprKind_Value:
+                        return node->value;
+                case ExprKind_BinaryOperator: {
+                        int lp = Node_Eval(node->arg0);
+                        int rp = Node_Eval(node->arg1);
+                        int ret = -1;
+                        switch(node->op){
+                        case Operator_Add: ret = lp + rp; break;
+                        case Operator_Sub: ret = lp - rp; break;
+                        case Operator_Mul: ret = lp * rp; break;
+                        case Operator_Div: ret = lp / rp; break;
+                        }
+                        return ret;
+                }
+                default:
+                        return -1;
+        }
+}
 void Node_Dump(Node* node){
         if( node == 0 ){
                 printf("<null>");
@@ -301,6 +393,15 @@ typedef struct ParserContext{
         int              fail; // fail flag
 }ParserContext;
 
+int ParserContext_Eval(ParserContext* ctx, Node* node){
+        if( ctx->fail ||
+            ctx->stack_ptr - ctx->stack_mem != 1 )
+                return 0;
+
+        int result = Node_Eval( ctx->stack_mem[0] );
+        return result;
+}
+
 int parse_term(ParserContext* ctx){
         switch(ctx->tokenizer.tok.type){
         case TokenType_Literal: 
@@ -326,6 +427,14 @@ int parse_factor(ParserContext* ctx){
 
         for(; ctx->tokenizer.tok.type == TokenType_Operator ;){
                 Token tokOp = ctx->tokenizer.tok;
+                Operator mappedOp;
+                switch(tokOp.op){
+                case '*' : mappedOp = Operator_Mul; break;
+                case '/' : mappedOp = Operator_Div; break;
+                default:
+                           return 1;
+                }
+
                 // eat the operator
                 Tokenizer_Next(&ctx->tokenizer);
                 if( ! parse_term(ctx) ){
@@ -341,60 +450,107 @@ int parse_factor(ParserContext* ctx){
                 *ctx->stack_ptr = result;
                 ++ctx->stack_ptr;
 
-                Operator mappedOp;
-                switch(tokOp.op){
-                case '+' : mappedOp = Operator_Add; break;
-                case '-' : mappedOp = Operator_Sub; break;
-                case '/' : mappedOp = Operator_Add; break;
-                case '*' : mappedOp = Operator_Sub; break;
-                default:
-                           ctx->fail = 1;
-                           return 0;
-                }
 
                 Node_InitOperator( result, mappedOp, lp, rp);
         }
         return 1;
 }
 
-void driver(const char* str){
+int parse_expr(ParserContext* ctx){
+        // this should populate the stack with a term
+        if ( ! parse_factor(ctx) ){
+                return 0;
+        }
+
+        for(; ctx->tokenizer.tok.type == TokenType_Operator ;){
+                Token tokOp = ctx->tokenizer.tok;
+                Operator mappedOp;
+                switch(tokOp.op){
+                case '+' : mappedOp = Operator_Add; break;
+                case '-' : mappedOp = Operator_Sub; break;
+                default:
+                           return 1;
+                }
+
+                // eat the operator
+                Tokenizer_Next(&ctx->tokenizer);
+                if( ! parse_factor(ctx) ){
+                        ctx->fail = 1;
+                        return 0;
+                }
+                --ctx->stack_ptr;
+                Node* rp = *ctx->stack_ptr;
+                --ctx->stack_ptr;
+                Node* lp = *ctx->stack_ptr;
+
+                Node* result = MemoryPool_Alloc(&ctx->pool, sizeof(Node));
+                *ctx->stack_ptr = result;
+                ++ctx->stack_ptr;
+
+
+                Node_InitOperator( result, mappedOp, lp, rp);
+        }
+        return 1;
+}
+
+int eval(const char* str){
         ParserContext ctx = {0};
         Tokenizer_Init(&ctx.tokenizer, str);
         MemoryPool_Init(&ctx.pool);
         ctx.stack_ptr = ctx.stack_mem;
 
-        printf(" str = %s\n", str);
-        
-        parse_factor(&ctx);
-
-        printf("stack_size = %d\n", ctx.stack_ptr - ctx.stack_mem );
+        parse_expr(&ctx);
 
         if( ! (ctx.stack_ptr - ctx.stack_mem == 1  )){
                 printf("bad stack, stack_size = %d\n", ctx.stack_ptr - ctx.stack_mem );
-                return;
+                return -1;
         }
 
+        int result = Node_Eval( ctx.stack_mem[0] );
+        
+        #if 0
         Node_Dump( ctx.stack_mem[0] );
-        printf("\n\n");
+        printf("\n");
+        Node_DumpPretty( ctx.stack_mem[0] );
+        printf("\n");
+        printf("eval -> %d\n", result  );
+        printf("\n");
+        #endif
+        return result;
 
 }
 
 
 int main(){
-        driver("11");
-        driver("11+22");
-        driver("11/ 444");
-        driver("11/ 444 * 222");
-        driver("11/ 444 * 222 + 999");
+        #define EVAL_TEST( EXPR ) do{\
+                int result = eval(#EXPR);\
+                if( result != (EXPR) ){\
+                        printf("eval failed on "#EXPR"\n");\
+                }\
+        }while(0)
+        EVAL_TEST(11);
+        EVAL_TEST(11+22);
+        EVAL_TEST(11- 444);
+        EVAL_TEST(11- 444 + 222);
+        EVAL_TEST(11- 444 + 222 + 999);
+
+        EVAL_TEST(1+2+3+4+5);
+        EVAL_TEST(1+2+3+4*5);
+        EVAL_TEST(1+2+3*4+5);
+        EVAL_TEST(1+2*3+4+5);
+        EVAL_TEST(1*2+3+4+5);
+
+        EVAL_TEST( 234 + 8788 / 2334); 
+        EVAL_TEST( 234 * 8788 / 2334); 
         #if 0
-        driver("");
-        driver("1");
-        driver("12");
-        driver("  1");
-        driver("1   ");
-        driver("1+3");
-        driver("1   *334   /2");
-        driver("35454");
-        driver("1+3sb");
+        eval("");
+        eval("1");
+        eval("12");
+        eval("  1");
+        eval("1   ");
+        eval("1+3");
+        eval("1   *334   /2");
+        eval("35454");
+        eval("1+3sb");
         #endif
 }
