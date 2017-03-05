@@ -5,6 +5,7 @@ extern int isspace(int);
 extern int isalpha(int);
 extern int isalnum(int);
 extern void* memset( void*, int , unsigned long long );
+extern char* strcpy( char*, const char*);
 
 #include <assert.h>
 
@@ -63,7 +64,7 @@ typedef enum TokenizerState{
 typedef enum TokenType{
         TokenType_invalid = 0, // so memset gives an invalid token
         TokenType_Literal,
-        TokenType_Word,
+        TokenType_Identifier,
         TokenType_Operator,
         TokenType_LParam,
         TokenType_RParam
@@ -72,7 +73,7 @@ typedef enum TokenType{
 typedef struct Token{
         TokenType type;
         int value;
-        char word[128];
+        char name[128];
         char op;
 }Token;
 
@@ -164,14 +165,14 @@ int Tokenizer_Next(TokenizerContext* ctx){
                                 return 1;
                         } else if( isalpha(*ctx->iter)){
                                 const char* end = ctx->iter;
-                                char* word_ptr = ctx->peak.word;
+                                char* word_ptr = ctx->peak.name;
                                 for(; end != ctx->end; ++end){
                                         if( ! ( isalnum(*end) || *end == '_' ) )
                                                 break;
                                         *word_ptr = *end;
                                         ++word_ptr;
                                 }
-                                ctx->peak.type  = TokenType_Word;
+                                ctx->peak.type  = TokenType_Identifier;
                                 ctx->iter = end;
                                 return 1;
                         } else{
@@ -265,6 +266,7 @@ void* MemoryPool_Alloc(MemoryPool* pool, unsigned long long size){
 
 typedef enum Exprkind{
         ExprKind_Value,
+        ExprKind_Indentifier,
         ExprKind_BinaryOperator
 }kind;
 
@@ -278,6 +280,7 @@ typedef enum Operator{
 typedef struct Node{
         int kind;
         int value;
+        char name[128];
         Operator op;
         struct Node* arg0;
         struct Node* arg1;
@@ -335,6 +338,9 @@ void Node_DumpPretty(Node* node){
         case ExprKind_Value:
                 printf("%d", node->value);
                 break;
+        case ExprKind_Indentifier:
+                printf("%s", node->name );
+                break;
         case ExprKind_BinaryOperator:
                 printf("(");
                 Node_DumpPretty(node->arg0);
@@ -359,6 +365,9 @@ int Node_Eval(Node* node){
         switch(node->kind){
                 case ExprKind_Value:
                         return node->value;
+                case ExprKind_Indentifier:
+                        // TODO
+                        return 1;
                 case ExprKind_BinaryOperator: {
                         int lp = Node_Eval(node->arg0);
                         int rp = Node_Eval(node->arg1);
@@ -384,6 +393,9 @@ void Node_Dump(Node* node){
         case ExprKind_Value:
                 printf("value(%d)", node->value);
                 break;
+        case ExprKind_Indentifier:
+                printf("identifier(%s)", (const char*)node->name);
+                break;
         case ExprKind_BinaryOperator:
                 printf("operator("); 
                 switch(node->op){
@@ -408,6 +420,11 @@ void Node_InitValue(Node* ptr, int value){
         memset(ptr, 0, sizeof(*ptr));
         ptr->kind  = ExprKind_Value;
         ptr->value = value;
+}
+void Node_InitIdentifer(Node* ptr, const char* name){
+        memset(ptr, 0, sizeof(*ptr));
+        ptr->kind  = ExprKind_Indentifier;
+        strcpy(ptr->name, name);
 }
 void Node_InitOperator(Node* ptr, Operator op, Node* left, Node* right){
         memset(ptr, 0, sizeof(*ptr));
@@ -448,6 +465,21 @@ int parse_term(ParserContext* ctx){
                 Tokenizer_Next(&ctx->tokenizer);
                 return 1;
         }
+        case TokenType_Identifier: {
+                // this can be a function call
+
+
+
+                // we got a idenfier
+                Node* ptr = MemoryPool_Alloc(&ctx->pool, sizeof(Node));
+                Node_InitIdentifer(ptr, ctx->tokenizer.tok.name);
+                *ctx->stack_ptr = ptr;
+                ++ctx->stack_ptr;
+                // eat it
+                Tokenizer_Next(&ctx->tokenizer);
+                return 1;
+        }
+
         case TokenType_LParam:
                 // eat it
                 Tokenizer_Next(&ctx->tokenizer);
@@ -553,7 +585,7 @@ int eval(const char* str){
 
         int result = Node_Eval( ctx.stack_mem[0] );
         
-        #if 0
+        #if 1
         Node_Dump( ctx.stack_mem[0] );
         printf("\n");
         Node_DumpPretty( ctx.stack_mem[0] );
@@ -574,6 +606,7 @@ int main(){
                         printf("eval failed on "#EXPR"\n");\
                 }\
         }while(0)
+
         EVAL_TEST(11);
         EVAL_TEST(11+22);
         EVAL_TEST(11- 444);
@@ -591,6 +624,10 @@ int main(){
 
         EVAL_TEST( 234 + 8788 / 2334); 
         EVAL_TEST( 234 * 8788 / 2334); 
+
+        eval("hello");
+        eval("hello+world");
+        
         #if 0
         eval("");
         eval("1");
