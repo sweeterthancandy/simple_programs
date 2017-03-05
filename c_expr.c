@@ -67,7 +67,8 @@ typedef enum TokenType{
         TokenType_Identifier,
         TokenType_Operator,
         TokenType_LParam,
-        TokenType_RParam
+        TokenType_RParam,
+        TokenType_Comma
 }TokenType;
 
 typedef struct Token{
@@ -148,6 +149,10 @@ int Tokenizer_Next(TokenizerContext* ctx){
                         ctx->peak.type = TokenType_RParam;
                         ++ctx->iter;
                         break;
+                case ',':
+                        ctx->peak.type = TokenType_Comma;
+                        ++ctx->iter;
+                        break;
                 default:{
                         if( isdigit(*ctx->iter)){
                                 // try to get value, otherwise fail the whole stream
@@ -215,6 +220,18 @@ void Tokenizer_DumpToken(Token* tok){
         case TokenType_Operator:
                 printf("operator(%c)\n", tok->op);
                 break;
+        case TokenType_Identifier:
+                printf("identifier(%s)\n", (const char*)tok->name);
+                break;
+        case TokenType_LParam:
+                printf(" ( \n");
+                break;
+        case TokenType_RParam:
+                printf(" ) \n");
+                break;
+        case TokenType_Comma:
+                printf(" , \n");
+                break;
         }
 }
 void Tokenizer_Dump(TokenizerContext* ctx){
@@ -267,6 +284,7 @@ void* MemoryPool_Alloc(MemoryPool* pool, unsigned long long size){
 typedef enum Exprkind{
         ExprKind_Value,
         ExprKind_Indentifier,
+        ExprKind_Call,
         ExprKind_BinaryOperator
 }kind;
 
@@ -284,6 +302,7 @@ typedef struct Node{
         Operator op;
         struct Node* arg0;
         struct Node* arg1;
+        struct Node* args[32];
 }Node;
 
 #if 0
@@ -329,35 +348,6 @@ void Node_Apply(NodeVisitor* v, Node* node){
 }
 #endif
 
-void Node_DumpPretty(Node* node){
-        if( node == 0 ){
-                printf("<null>");
-                return;
-        }
-        switch(node->kind){
-        case ExprKind_Value:
-                printf("%d", node->value);
-                break;
-        case ExprKind_Indentifier:
-                printf("%s", node->name );
-                break;
-        case ExprKind_BinaryOperator:
-                printf("(");
-                Node_DumpPretty(node->arg0);
-                switch(node->op){
-                case Operator_Add: printf("+"); break;
-                case Operator_Sub: printf("-"); break;
-                case Operator_Div: printf("/"); break;
-                case Operator_Mul: printf("*"); break;
-                }
-                Node_DumpPretty(node->arg1);
-                printf(")");
-                break;
-        defualt:
-                printf("<invalid>");
-                break;
-        }
-}
 int Node_Eval(Node* node){
         if( node == 0 ){
                 return -1;
@@ -366,6 +356,9 @@ int Node_Eval(Node* node){
                 case ExprKind_Value:
                         return node->value;
                 case ExprKind_Indentifier:
+                        // TODO
+                        return 1;
+                case ExprKind_Call:
                         // TODO
                         return 1;
                 case ExprKind_BinaryOperator: {
@@ -384,6 +377,7 @@ int Node_Eval(Node* node){
                         return -1;
         }
 }
+
 void Node_Dump(Node* node){
         if( node == 0 ){
                 printf("<null>");
@@ -395,6 +389,13 @@ void Node_Dump(Node* node){
                 break;
         case ExprKind_Indentifier:
                 printf("identifier(%s)", (const char*)node->name);
+                break;
+        case ExprKind_Call:
+                printf("call(%s,", node->name );
+                for(Node** iter = node->args; *iter != 0; ++iter){
+                        Node_Dump(*iter);
+                }
+                printf(")");
                 break;
         case ExprKind_BinaryOperator:
                 printf("operator("); 
@@ -416,6 +417,43 @@ void Node_Dump(Node* node){
         }
 }
 
+void Node_DumpPretty(Node* node){
+        if( node == 0 ){
+                printf("<null>");
+                return;
+        }
+        switch(node->kind){
+        case ExprKind_Value:
+                printf("%d", node->value);
+                break;
+        case ExprKind_Indentifier:
+                printf("%s", node->name );
+                break;
+        case ExprKind_Call:
+                printf("%s(", node->name );
+                for(Node** iter = node->args; *iter != 0; ++iter){
+                        Node_DumpPretty(*iter);
+                }
+                printf(")");
+                break;
+        case ExprKind_BinaryOperator:
+                printf("(");
+                Node_DumpPretty(node->arg0);
+                switch(node->op){
+                case Operator_Add: printf("+"); break;
+                case Operator_Sub: printf("-"); break;
+                case Operator_Div: printf("/"); break;
+                case Operator_Mul: printf("*"); break;
+                }
+                Node_DumpPretty(node->arg1);
+                printf(")");
+                break;
+        defualt:
+                printf("<invalid>");
+                break;
+        }
+}
+
 void Node_InitValue(Node* ptr, int value){
         memset(ptr, 0, sizeof(*ptr));
         ptr->kind  = ExprKind_Value;
@@ -425,6 +463,15 @@ void Node_InitIdentifer(Node* ptr, const char* name){
         memset(ptr, 0, sizeof(*ptr));
         ptr->kind  = ExprKind_Indentifier;
         strcpy(ptr->name, name);
+}
+// args is null-terminated
+void Node_InitCall(Node* ptr, const char* name, Node** args){
+        memset(ptr, 0, sizeof(*ptr));
+        ptr->kind  = ExprKind_Call;
+        strcpy(ptr->name, name);
+        for(Node** iter = args, **dest = ptr->args; *iter != 0; ++iter){
+                *dest = *iter;
+        }
 }
 void Node_InitOperator(Node* ptr, Operator op, Node* left, Node* right){
         memset(ptr, 0, sizeof(*ptr));
@@ -468,16 +515,74 @@ int parse_term(ParserContext* ctx){
         case TokenType_Identifier: {
                 // this can be a function call
 
-
-
-                // we got a idenfier
-                Node* ptr = MemoryPool_Alloc(&ctx->pool, sizeof(Node));
-                Node_InitIdentifer(ptr, ctx->tokenizer.tok.name);
-                *ctx->stack_ptr = ptr;
-                ++ctx->stack_ptr;
+                Token idTok = ctx->tokenizer.tok;
                 // eat it
                 Tokenizer_Next(&ctx->tokenizer);
-                return 1;
+
+                // it's a function call when 
+                //      <identifier> ( ...
+                if( ctx->tokenizer.tok.type == TokenType_LParam ){
+                        // eat the (
+                        Tokenizer_Next(&ctx->tokenizer);
+
+
+                        Node* args[32] = {0};
+                        Node** arg_ptr = args;
+
+                        // check if not a nullary function call
+                        if( ctx->tokenizer.tok.type != TokenType_RParam ){
+                                printf("parsign function args\n");
+                                for(;;){
+                                        if( ! parse_expr(ctx) ){
+                                                printf("failed to parse expression for function\n");
+                                                ctx->fail = 1;
+                                                return 0;
+                                        }
+
+                                        // put it on the arg stack
+                                        --ctx->stack_ptr;
+                                        *arg_ptr = *ctx->stack_ptr;
+
+                                        Node_Dump( *arg_ptr );
+                                        ++arg_ptr;
+                                        printf("stack_size = %d\n", ctx->stack_ptr - ctx->stack_mem );
+
+                                        switch( ctx->tokenizer.tok.type ){
+                                        case TokenType_Comma:
+                                                // eat it
+                                                Tokenizer_Next(&ctx->tokenizer);
+                                                continue;
+                                        }
+
+                                        // XXX
+                                        break;
+                                }
+                        }
+                        if( ctx->tokenizer.tok.type != TokenType_RParam ){
+                                printf("expected ) token\n");
+                                ctx->fail = 1;
+                                return 0;
+                        }
+                        // eat it
+                        Tokenizer_Next(&ctx->tokenizer);
+                
+                        // we got a function call
+                        Node* ptr = MemoryPool_Alloc(&ctx->pool, sizeof(Node));
+                        Node_InitCall(ptr, idTok.name, args);
+                        *ctx->stack_ptr = ptr;
+                        ++ctx->stack_ptr;
+                        return 1;
+                } else {
+
+
+
+                        // we got a idenfier
+                        Node* ptr = MemoryPool_Alloc(&ctx->pool, sizeof(Node));
+                        Node_InitIdentifer(ptr, ctx->tokenizer.tok.name);
+                        *ctx->stack_ptr = ptr;
+                        ++ctx->stack_ptr;
+                        return 1;
+                }
         }
 
         case TokenType_LParam:
@@ -485,6 +590,8 @@ int parse_term(ParserContext* ctx){
                 Tokenizer_Next(&ctx->tokenizer);
                 parse_expr(ctx);
                 if(ctx->tokenizer.tok.type != TokenType_RParam){
+
+                        printf("bad pathing of ( expr )\n");
                         ctx->fail = 1;
                         return 0;
                 }
@@ -492,6 +599,8 @@ int parse_term(ParserContext* ctx){
                 Tokenizer_Next(&ctx->tokenizer);
                 return 1;
         default:
+                printf("bad token\n");
+                Tokenizer_Dump(&ctx->tokenizer);
                 return 0;
         }
 }
@@ -515,6 +624,7 @@ int parse_factor(ParserContext* ctx){
                 // eat the operator
                 Tokenizer_Next(&ctx->tokenizer);
                 if( ! parse_term(ctx) ){
+                        printf("bad term\n");
                         ctx->fail = 1;
                         return 0;
                 }
@@ -599,6 +709,7 @@ int eval(const char* str){
 
 
 int main(){
+        #if 0
         #define EVAL_TEST( EXPR ) do{\
                 int result = eval(#EXPR);\
                 printf(#EXPR " = %d\n", result); \
@@ -627,6 +738,17 @@ int main(){
 
         eval("hello");
         eval("hello+world");
+
+        Tokenizer_dotest("f(1)");
+        Tokenizer_dotest("f(1+2)");
+        Tokenizer_dotest("f(1,2)");
+        #endif
+        
+        
+        eval("f(1)");
+        eval("f(1+2)");
+        eval("f(1,2)");
+        eval("f()");
         
         #if 0
         eval("");
