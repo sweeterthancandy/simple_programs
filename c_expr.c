@@ -172,7 +172,6 @@ int Tokenizer_Next(TokenizerContext* ctx){
                                 //              123.1
                                 //
                                 if( end != ctx->end && *end == '.' ){
-                                        printf("got fp\n");
                                         ++end;
                                         double rest = 0;
                                         double base = 1e-1;
@@ -183,7 +182,6 @@ int Tokenizer_Next(TokenizerContext* ctx){
                                                 rest += ( *end - '0' ) * base;
                                                 base /= 10.0;
                                         }
-                                        printf("rest = %f\n", rest);
                                         ctx->peak.value += rest;
                                 }
                                 ctx->peak.type  = TokenType_Literal;
@@ -359,10 +357,8 @@ double Node_Eval(Node* node){
 
                                         for(Node** iter = node->args; *iter != 0; ++iter){
                                                 *evalPtr = Node_Eval( *iter);
-                                                printf("%f, ", *evalPtr);
                                                 ++evalPtr;
                                         }
-                                        printf("\narity = %d\n", node->arity);
                                         switch(node->arity){
                                         case 2: ret = iter->fun(evalArgs[0], evalArgs[1]); break;
                                         case 1: ret = iter->fun(evalArgs[0]);              break;
@@ -548,10 +544,8 @@ int parse_term(ParserContext* ctx){
 
                         // check if not a nullary function call
                         if( ctx->tokenizer.tok.type != TokenType_RParam ){
-                                printf("parsign function args\n");
                                 for(;;){
                                         if( ! parse_expr(ctx) ){
-                                                printf("failed to parse expression for function\n");
                                                 ctx->fail = 1;
                                                 return 0;
                                         }
@@ -562,7 +556,6 @@ int parse_term(ParserContext* ctx){
 
                                         Node_Dump( *arg_ptr );
                                         ++arg_ptr;
-                                        printf("stack_size = %d\n", ctx->stack_ptr - ctx->stack_mem );
 
                                         switch( ctx->tokenizer.tok.type ){
                                         case TokenType_Comma:
@@ -576,7 +569,6 @@ int parse_term(ParserContext* ctx){
                                 }
                         }
                         if( ctx->tokenizer.tok.type != TokenType_RParam ){
-                                printf("expected ) token\n");
                                 ctx->fail = 1;
                                 return 0;
                         }
@@ -608,7 +600,6 @@ int parse_term(ParserContext* ctx){
                 parse_expr(ctx);
                 if(ctx->tokenizer.tok.type != TokenType_RParam){
 
-                        printf("bad pathing of ( expr )\n");
                         ctx->fail = 1;
                         return 0;
                 }
@@ -616,7 +607,6 @@ int parse_term(ParserContext* ctx){
                 Tokenizer_Next(&ctx->tokenizer);
                 return 1;
         default:
-                printf("bad token\n");
                 Tokenizer_Dump(&ctx->tokenizer);
                 return 0;
         }
@@ -641,7 +631,6 @@ int parse_factor(ParserContext* ctx){
                 // eat the operator
                 Tokenizer_Next(&ctx->tokenizer);
                 if( ! parse_term(ctx) ){
-                        printf("bad term\n");
                         ctx->fail = 1;
                         return 0;
                 }
