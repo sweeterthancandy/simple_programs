@@ -74,7 +74,7 @@ typedef enum TokenType{
 
 typedef struct Token{
         TokenType type;
-        int value;
+        double value;
         char name[128];
         char op;
 }Token;
@@ -165,6 +165,26 @@ int Tokenizer_Next(TokenizerContext* ctx){
                                                 break;
                                         ctx->peak.value *= 10;
                                         ctx->peak.value += *end - '0';
+                                }
+                                // if we have a floating point literal
+                                //      
+                                //              234.23
+                                //              123.1
+                                //
+                                if( end != ctx->end && *end == '.' ){
+                                        printf("got fp\n");
+                                        ++end;
+                                        double rest = 0;
+                                        double base = 1e-1;
+                                        for(; end != ctx->end; ++end){
+                                                if( ! isdigit(*end) ){
+                                                        break;
+                                                }
+                                                rest += ( *end - '0' ) * base;
+                                                base /= 10.0;
+                                        }
+                                        printf("rest = %f\n", rest);
+                                        ctx->peak.value += rest;
                                 }
                                 ctx->peak.type  = TokenType_Literal;
                                 ctx->iter = end;
@@ -677,7 +697,7 @@ int parse_expr(ParserContext* ctx){
         return 1;
 }
 
-int eval(const char* str){
+double eval(const char* str){
         ParserContext ctx = {0};
         Tokenizer_Init(&ctx.tokenizer, str);
         MemoryPool_Init(&ctx.pool);
@@ -692,7 +712,7 @@ int eval(const char* str){
 
         double result = Node_Eval( ctx.stack_mem[0] );
         
-        #if 1
+        #if 0
         Node_Dump( ctx.stack_mem[0] );
         printf("\n");
         Node_DumpPretty( ctx.stack_mem[0] );
@@ -705,7 +725,7 @@ int eval(const char* str){
 }
 
 
-int main(){
+int self_test(){
         #if 0
         #define EVAL_TEST( EXPR ) do{\
                 int result = eval(#EXPR);\
@@ -749,8 +769,11 @@ int main(){
         eval("f()");
         #endif
         
+        #if 0
         eval("cos(2)");
         eval("2*sin(23)");
+        #endif
+        eval("0.34");
         
         #if 0
         eval("");
@@ -763,4 +786,11 @@ int main(){
         eval("35454");
         eval("1+3sb");
         #endif
+}
+
+
+int main(int argc, char** argv){
+        if( argc == 3 && strcmp(argv[1],"-c") == 0 ){
+                printf("%f\n", eval(argv[2]));
+        }
 }
