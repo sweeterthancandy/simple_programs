@@ -336,6 +336,16 @@ static InternalFunctionMapping internalFunctions[] = {
         {0,0}
 };
 
+typedef struct InternalConstantMapping{
+        const char* name;
+        double value;
+}InternalConstantMapping;
+static InternalConstantMapping internalConstantMappings[] = {
+        {"pi", 3.14159265359},
+        {0,0}
+};
+
+
 double Node_Eval(Node* node){
 
 
@@ -346,6 +356,12 @@ double Node_Eval(Node* node){
                 case ExprKind_Value:
                         return node->value;
                 case ExprKind_Indentifier:
+                        for(InternalConstantMapping* iter = internalConstantMappings; iter->name !=0;++iter){
+                                if( strcmp( iter->name, node->name ) == 0 ){
+                                        return iter->value;
+                                }
+                        }
+                        printf("bad internal mapping %s\n", node->name);
                         // TODO
                         return 1;
                 case ExprKind_Call:
@@ -365,11 +381,13 @@ double Node_Eval(Node* node){
                                         case 0: ret = iter->fun();                         break;
                                         default:
                                                 // TODO not implemented
+                                                printf("not implenated\n");
                                                 return 0;
                                         }
                                         return ret;
                                 }
                         }
+                        printf("bad internal mapping %s\n", node->name);
                         // TODO
                         return 1;
                 case ExprKind_BinaryOperator: {
@@ -554,7 +572,6 @@ int parse_term(ParserContext* ctx){
                                         --ctx->stack_ptr;
                                         *arg_ptr = *ctx->stack_ptr;
 
-                                        Node_Dump( *arg_ptr );
                                         ++arg_ptr;
 
                                         switch( ctx->tokenizer.tok.type ){
@@ -587,7 +604,7 @@ int parse_term(ParserContext* ctx){
 
                         // we got a idenfier
                         Node* ptr = MemoryPool_Alloc(&ctx->pool, sizeof(Node));
-                        Node_InitIdentifer(ptr, ctx->tokenizer.tok.name);
+                        Node_InitIdentifer(ptr, idTok.name);
                         *ctx->stack_ptr = ptr;
                         ++ctx->stack_ptr;
                         return 1;
@@ -701,7 +718,7 @@ double eval(const char* str){
 
         double result = Node_Eval( ctx.stack_mem[0] );
         
-        #if 0
+        #if 1
         Node_Dump( ctx.stack_mem[0] );
         printf("\n");
         Node_DumpPretty( ctx.stack_mem[0] );
